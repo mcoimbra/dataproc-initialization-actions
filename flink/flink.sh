@@ -51,7 +51,9 @@ readonly START_FLINK_YARN_SESSION_METADATA_KEY='flink-start-yarn-session'
 readonly START_FLINK_YARN_SESSION_DEFAULT=true
 
 # Set this to install flink from a snapshot URL instead of apt
-readonly FLINK_SNAPSHOT_URL_METADATA_KEY='flink-snapshot-url'
+#readonly FLINK_SNAPSHOT_URL_METADATA_KEY='flink-snapshot-url'
+readonly FLINK_SNAPSHOT_URL_METADATA_KEY='https://archive.apache.org/dist/flink/flink-1.6.2/flink-1.6.2-bin-scala_2.11.tgz'
+
 
 
 
