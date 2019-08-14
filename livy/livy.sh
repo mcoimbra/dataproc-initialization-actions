@@ -14,18 +14,27 @@
 
 set -euxo pipefail
 
-readonly LIVY_VERSION="0.5.0"
+readonly DATAPROC_VERSION="$(grep DATAPROC_VERSION /etc/environment | cut -d= -f2 | sed -e 's/"//g')"
+
+if [[ "${DATAPROC_VERSION}" == '1.0' ]] || [[ "${DATAPROC_VERSION}" == '1.1' ]]; then
+  readonly LIVY_VERSION="0.5.0"
+  readonly LIVY_PKG_NAME="livy-${LIVY_VERSION}-incubating-bin"
+else
+  readonly LIVY_VERSION="0.6.0"
+  readonly LIVY_PKG_NAME="apache-livy-${LIVY_VERSION}-incubating-bin"
+fi
+
 readonly LIVY_DIR="/usr/local/lib/livy"
 readonly LIVY_BIN="${LIVY_DIR}/bin"
 readonly LIVY_CONF="${LIVY_DIR}/conf"
 
 # Apache mirror redirector.
 readonly APACHE_MIRROR="https://www.apache.org/dyn/mirrors/mirrors.cgi?action=download&filename"
-readonly BIN_PKG="incubator/livy/${LIVY_VERSION}-incubating/livy-${LIVY_VERSION}-incubating-bin.zip"
+readonly PKG_PATH="incubator/livy/${LIVY_VERSION}-incubating/${LIVY_PKG_NAME}.zip"
 
 # Generate livy environment file.
 function make_livy_env() {
-  cat << EOF > "${LIVY_CONF}/livy-env.sh"
+  cat <<EOF >"${LIVY_CONF}/livy-env.sh"
 export SPARK_HOME=/usr/lib/spark
 export SPARK_CONF_DIR=/etc/spark/conf
 export HADOOP_CONF_DIR=/etc/hadoop/conf
@@ -35,7 +44,7 @@ EOF
 
 # Create Livy service.
 function create_systemd_unit() {
-  cat << EOF > "/etc/systemd/system/livy.service"
+  cat <<EOF >"/etc/systemd/system/livy.service"
 [Unit]
 Description=Apache Livy service
 After=network.target
@@ -64,15 +73,15 @@ function main() {
   # Download Livy binary.
   local temp
   temp=$(mktemp -d)
-  wget -O "${temp}/livy.zip" "${APACHE_MIRROR}=${BIN_PKG}"
-  unzip "${temp}/livy.zip" -d "${temp}"
+  wget --progress=dot:mega --timeout=30 -O "${temp}/livy.zip" "${APACHE_MIRROR}=${PKG_PATH}"
+  unzip -q "${temp}/livy.zip" -d "${temp}"
 
   # Create Livy user.
   useradd -G hadoop livy
 
   # Setup livy package.
   install -d "${LIVY_DIR}"
-  cp -r "${temp}/livy-${LIVY_VERSION}-incubating-bin"/* "${LIVY_DIR}"
+  cp -r "${temp}/${LIVY_PKG_NAME}/"* "${LIVY_DIR}"
   chown -R "livy:livy" "${LIVY_DIR}"
 
   # Setup log directory.
@@ -87,8 +96,8 @@ function main() {
 
   # Start livy service.
   create_systemd_unit
-  systemctl enable "livy.service"
-  systemctl start "livy.service"
+  systemctl enable livy.service
+  systemctl start livy.service
 }
 
 main

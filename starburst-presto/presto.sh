@@ -21,8 +21,8 @@ export PATH=/usr/bin:$PATH
 readonly ROLE="$(/usr/share/google/get_metadata_value attributes/dataproc-role)"
 readonly PRESTO_MASTER_FQDN="$(/usr/share/google/get_metadata_value attributes/dataproc-master)"
 readonly WORKER_COUNT=$(/usr/share/google/get_metadata_value attributes/dataproc-worker-count)
-readonly PRESTO_MAJOR_VERSION="302"
-readonly STARBURST_PRESTO_VERSION="302-e.11"
+readonly PRESTO_MAJOR_VERSION="312"
+readonly STARBURST_PRESTO_VERSION="312-e.1"
 readonly HTTP_PORT="8080"
 readonly INIT_SCRIPT="/usr/lib/systemd/system/presto.service"
 PRESTO_JVM_MB=0;
@@ -125,19 +125,38 @@ hive.metastore.uri=${metastore_uri}
 EOF
 }
 
+function configure_connectors() {
+  cat > presto-server/etc/catalog/tpch.properties <<EOF
+connector.name=tpch
+EOF
+
+cat > presto-server/etc/catalog/tpcds.properties <<EOF
+connector.name=tpcds
+EOF
+
+cat > presto-server/etc/catalog/jmx.properties <<EOF
+connector.name=jmx
+EOF
+
+cat > presto-server/etc/catalog/memory.properties <<EOF
+connector.name=memory
+EOF
+}
+
 function configure_jvm(){
   cat > presto-server/etc/jvm.config <<EOF
 -server
 -Xmx${PRESTO_JVM_MB}m
--Xmn512m
--XX:+UseConcMarkSweepGC
+-XX:-UseBiasedLocking
+-XX:+UseG1GC
+-XX:G1HeapRegionSize=32M
 -XX:+ExplicitGCInvokesConcurrent
--XX:ReservedCodeCacheSize=150M
--XX:+ExplicitGCInvokesConcurrent
--XX:+CMSClassUnloadingEnabled
--XX:+AggressiveOpts
+-XX:+ExitOnOutOfMemoryError
+-XX:+UseGCOverheadLimit
 -XX:+HeapDumpOnOutOfMemoryError
--XX:OnOutOfMemoryError=kill -9 %p
+-XX:ReservedCodeCacheSize=512M
+-Djdk.attach.allowAttachSelf=true
+-Djdk.nio.maxCachedBufferSize=2000000
 -Dhive.config.resources=/etc/hadoop/conf/core-site.xml,/etc/hadoop/conf/hdfs-site.xml
 -Djava.library.path=/usr/lib/hadoop/lib/native/:/usr/lib/
 EOF
@@ -212,6 +231,7 @@ function configure_and_start_presto(){
 
   configure_node_properties
   configure_hive
+  configure_connectors
   configure_jvm
 
   if [[ "${HOSTNAME}" == "${PRESTO_MASTER_FQDN}" ]]; then

@@ -20,9 +20,7 @@ set -euxo pipefail
 readonly NODE_NAME="$(/usr/share/google/get_metadata_value name)"
 readonly RANGER_ADMIN_PORT="$(/usr/share/google/get_metadata_value attributes/ranger-port || echo '6080')"
 readonly RANGER_ADMIN_PASS="$(/usr/share/google/get_metadata_value attributes/default-admin-password)"
-readonly RANGER_GCS_BUCKET='apache-ranger-1-2-0-artifacts'
 readonly RANGER_INSTALL_DIR='/usr/lib/ranger'
-readonly RANGER_VERSION='1.2.0'
 readonly SOLR_HOME='/usr/lib/solr'
 readonly MASTER_ADDITIONAL="$(/usr/share/google/get_metadata_value attributes/dataproc-master-additional)"
 readonly CLUSTER_NAME="$(/usr/share/google/get_metadata_value attributes/dataproc-cluster-name)"
@@ -32,12 +30,24 @@ function err() {
   return 1
 }
 
-function download_and_install_component() {
-  local full_component_name="$(echo ${1} | sed "s/^ranger/ranger-${RANGER_VERSION}/")"
-  gsutil cp "gs://${RANGER_GCS_BUCKET}/${full_component_name}.tar.gz" "${RANGER_INSTALL_DIR}/"
-  tar -xf "${full_component_name}.tar.gz" \
-    && ln -s "${full_component_name}" "${1}" \
-    && rm -f "${full_component_name}.tar.gz"
+function retry_apt_command() {
+  cmd="$1"
+  for ((i = 0; i < 10; i++)); do
+    if eval "$cmd"; then
+      return 0
+    fi
+    sleep 5
+  done
+  return 1
+}
+
+function update_apt_get() {
+  retry_apt_command "apt-get update"
+}
+
+function install_apt_get() {
+  local pkgs="$*"
+  retry_apt_command "apt-get install -y $pkgs"
 }
 
 function configure_admin() {
@@ -71,7 +81,6 @@ function configure_admin() {
 }
 
 function run_ranger_admin() {
-  download_and_install_component "ranger-admin"
   configure_admin
   pushd "${RANGER_INSTALL_DIR}/ranger-admin" && ./set_globals.sh && ./setup.sh
   ranger-admin start
@@ -79,7 +88,6 @@ function run_ranger_admin() {
 }
 
 function add_usersync_plugin() {
-  download_and_install_component "ranger-usersync"
   mkdir -p /var/log/ranger-usersync && chown ranger /var/log/ranger-usersync \
     && chgrp ranger /var/log/ranger-usersync
 
@@ -127,7 +135,6 @@ function create_symlinks_to_hadoop_conf() {
 }
 
 function add_hdfs_plugin() {
-  download_and_install_component "ranger-hdfs-plugin"
   apply_common_plugin_configuration "ranger-hdfs-plugin" "hadoop-dataproc"
 
   pushd ranger-hdfs-plugin && ./enable-hdfs-plugin.sh && popd
@@ -164,7 +171,7 @@ EOF
     # Waiting until hdfs plugin will be configured on m-0
     until hadoop fs -ls /tmp/ranger-hdfs-plugin-ready &> /dev/null
     do
-	  sleep 10
+      sleep 10
     done
     systemctl stop hadoop-hdfs-namenode.service
     systemctl start hadoop-hdfs-namenode.service
@@ -172,7 +179,6 @@ EOF
 }
 
 function add_hive_plugin() {
-  download_and_install_component "ranger-hive-plugin"
   apply_common_plugin_configuration "ranger-hive-plugin" "hive-dataproc"
   mkdir -p hive \
     && ln -s /etc/hive/conf hive \
@@ -186,7 +192,7 @@ function add_hive_plugin() {
     # Notify cluster that hive plugin is installed on master.
     until hadoop fs -touchz /tmp/ranger-hive-plugin-ready  &> /dev/null
     do
-	  sleep 10
+      sleep 10
     done
 
     cat << EOF > service-hive.json
@@ -210,7 +216,7 @@ EOF
     # Waiting until hive plugin will be configured on m-0
     until hadoop fs -ls /tmp/ranger-hive-plugin-ready &> /dev/null
     do
-	  sleep 10
+      sleep 10
     done
     systemctl stop hive-server2.service
     systemctl start hive-server2.service
@@ -218,7 +224,6 @@ EOF
 }
 
 function add_yarn_plugin() {
-  download_and_install_component "ranger-yarn-plugin"
   apply_common_plugin_configuration "ranger-yarn-plugin" "yarn-dataproc"
   pushd ranger-yarn-plugin && ./enable-yarn-plugin.sh && popd
 
@@ -229,7 +234,7 @@ function add_yarn_plugin() {
     # Notify cluster that yarn plugin is installed on master.
     until hadoop fs -touchz /tmp/ranger-yarn-plugin-ready  &> /dev/null
     do
-	  sleep 10
+      sleep 10
     done
 
     cat << EOF > service-yarn.json
@@ -252,7 +257,7 @@ EOF
     # Waiting until yarn plugin will be configured on m-0
     until hadoop fs -ls /tmp/ranger-yarn-plugin-ready &> /dev/null
     do
-	  sleep 10
+      sleep 10
     done
     systemctl stop hadoop-yarn-resourcemanager.service
     systemctl start hadoop-yarn-resourcemanager.service
@@ -266,6 +271,9 @@ function main() {
     err 'Ranger admin password not set. Please use metadata flag - default-password'
   fi
   mkdir -p "${RANGER_INSTALL_DIR}" && cd "${RANGER_INSTALL_DIR}"
+
+  update_apt_get
+  install_apt_get ranger
 
   if [[ "${role}" == 'Master' && "${NODE_NAME}" =~ ^.*(-m|-m-0)$ ]]; then
     run_ranger_admin
